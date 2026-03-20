@@ -155,12 +155,15 @@ def translate_descriptions(
     api_key: str,
     model: str = "gpt-5-mini",
     base_url: str | None = None,
+    default_headers: dict | None = None,
 ) -> List[str]:
     logger.info("Translating descriptions with OpenAI (%s)...", model)
     client_kwargs = {"api_key": api_key}
     if base_url:
         client_kwargs["base_url"] = base_url
         logger.info("Using OpenAI base URL: %s", base_url)
+    if default_headers:
+        client_kwargs["default_headers"] = default_headers
     client = OpenAI(**client_kwargs)
     raw_desc = build_translation_input(items)
     prompt = (
@@ -280,7 +283,25 @@ def main() -> int:
 
     openai_api_key = os.getenv("OPENAI_API_KEY")
     openai_base_url = (os.getenv("OPENAI_BASE_URL") or "").strip() or None
-    openai_model = (os.getenv("OPENAI_MODEL") or "gpt-5-mini").strip() or "gpt-5-mini"
+    openai_model_raw = (os.getenv("OPENAI_MODEL") or "").strip()
+    if openai_model_raw:
+        openai_model = openai_model_raw
+    elif openai_base_url and "openrouter.ai" in openai_base_url:
+        openai_model = "openrouter/free"
+    else:
+        openai_model = "gpt-5-mini"
+
+    default_headers = {}
+    if openai_base_url and "openrouter.ai" in openai_base_url:
+        openrouter_site_url = (os.getenv("OPENROUTER_SITE_URL") or "").strip()
+        openrouter_app_name = (os.getenv("OPENROUTER_APP_NAME") or "push-telegram").strip()
+        if openrouter_site_url:
+            default_headers["HTTP-Referer"] = openrouter_site_url
+        if openrouter_app_name:
+            default_headers["X-Title"] = openrouter_app_name
+        if default_headers:
+            logger.info("Using OpenRouter headers: %s", ",".join(sorted(default_headers.keys())))
+
     telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
     telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID")
 
@@ -298,6 +319,7 @@ def main() -> int:
             openai_api_key,
             model=openai_model,
             base_url=openai_base_url,
+            default_headers=default_headers or None,
         )
         final_message = format_message(items, desc_zh_list)
         message_chunks = split_message(final_message)

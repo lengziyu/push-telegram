@@ -44,6 +44,18 @@ OPENAI_MODEL=gpt-5-mini
 - `OPENAI_BASE_URL` 不填时默认直连官方 OpenAI。
 - 代理常常要求特定模型名，如果报模型相关错误，把 `OPENAI_MODEL` 改成代理支持的模型。
 
+### OpenRouter 免费路由示例
+
+```env
+OPENAI_API_KEY=sk-or-v1-your_openrouter_key
+OPENAI_BASE_URL=https://openrouter.ai/api/v1
+OPENAI_MODEL=openrouter/free
+
+# 可选（OpenRouter 推荐）
+OPENROUTER_SITE_URL=
+OPENROUTER_APP_NAME=push-telegram
+```
+
 ## 本地运行
 
 正常发送到 Telegram：
@@ -56,6 +68,13 @@ python3 main.py
 
 ```bash
 python3 main.py --dry-run
+```
+
+也可以直接用脚本（自动处理 venv 和依赖）：
+
+```bash
+./run.sh
+./run.sh --dry-run
 ```
 
 ## 日志与健壮性
@@ -75,5 +94,9 @@ python3 main.py --dry-run
 在 GitHub 仓库 `Settings -> Secrets and variables -> Actions` 中添加以下 Secrets：
 
 - `OPENAI_API_KEY`
+- `OPENAI_BASE_URL`（OpenRouter 用 `https://openrouter.ai/api/v1`）
+- `OPENAI_MODEL`（OpenRouter 可用 `openrouter/free`）
+- `OPENROUTER_SITE_URL`（可选）
+- `OPENROUTER_APP_NAME`（可选）
 - `TELEGRAM_BOT_TOKEN`
 - `TELEGRAM_CHAT_ID`
