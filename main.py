@@ -78,6 +78,10 @@ def build_translation_input(items: List[dict]) -> str:
     return "\n".join(f"{idx}. {item['desc'] or '(No description)'}" for idx, item in enumerate(items, 1))
 
 
+def fallback_descriptions(items: List[dict]) -> List[str]:
+    return [item["desc"] or "(No description)" for item in items]
+
+
 def parse_json_from_model(text: str):
     candidate = text.strip()
     if candidate.startswith("```"):
@@ -305,22 +309,31 @@ def main() -> int:
     telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
     telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID")
 
-    if not openai_api_key:
-        logger.error("Missing OPENAI_API_KEY in environment.")
-        return 1
     if not args.dry_run and (not telegram_bot_token or not telegram_chat_id):
         logger.error("Missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID in environment.")
         return 1
 
     try:
         items = fetch_trending(TOP_N)
-        desc_zh_list = translate_descriptions(
-            items,
-            openai_api_key,
-            model=openai_model,
-            base_url=openai_base_url,
-            default_headers=default_headers or None,
-        )
+        if not openai_api_key:
+            logger.warning("Missing OPENAI_API_KEY. Skipping translation and using original descriptions.")
+            desc_zh_list = fallback_descriptions(items)
+        else:
+            try:
+                desc_zh_list = translate_descriptions(
+                    items,
+                    openai_api_key,
+                    model=openai_model,
+                    base_url=openai_base_url,
+                    default_headers=default_headers or None,
+                )
+            except Exception as exc:
+                logger.exception(
+                    "Translation failed, fallback to original descriptions. error=%s",
+                    exc,
+                )
+                desc_zh_list = fallback_descriptions(items)
+
         final_message = format_message(items, desc_zh_list)
         message_chunks = split_message(final_message)
         logger.info("Prepared %s message chunk(s).", len(message_chunks))

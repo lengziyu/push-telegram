@@ -89,13 +89,16 @@ python3 main.py --dry-run
 
 - `.github/workflows/trending.yml`
 
-默认每天定时执行（UTC 时间），并支持手动触发。
+默认每天定时执行两次（北京时间）并支持手动触发：
+
+- `09:00`
+- `19:30`
 
 在 GitHub 仓库 `Settings -> Secrets and variables -> Actions` 中添加以下 Secrets：
 
-- `OPENAI_API_KEY`
-- `OPENAI_BASE_URL`（OpenRouter 用 `https://openrouter.ai/api/v1`）
-- `OPENAI_MODEL`（OpenRouter 可用 `openrouter/free`）
+- `OPENAI_API_KEY`（或 `OPENROUTER_API_KEY` 二选一）
+- `OPENAI_BASE_URL`（可选，不填默认 `https://openrouter.ai/api/v1`）
+- `OPENAI_MODEL`（可选，不填默认 `openrouter/free`）
 - `OPENROUTER_SITE_URL`（可选）
 - `OPENROUTER_APP_NAME`（可选）
 - `TELEGRAM_BOT_TOKEN`

@@ -2,13 +2,22 @@ name: GitHub Trending to Telegram
 
 on:
   schedule:
-    - cron: "0 1 * * *" # Every day at 01:00 UTC
+    - cron: "0 1 * * *" # Every day at 09:00 Asia/Shanghai (UTC+8)
+    - cron: "30 11 * * *" # Every day at 19:30 Asia/Shanghai (UTC+8)
   workflow_dispatch:
 
 jobs:
   run:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY || secrets.OPENROUTER_API_KEY }}
+      OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL || 'https://openrouter.ai/api/v1' }}
+      OPENAI_MODEL: ${{ secrets.OPENAI_MODEL || 'openrouter/free' }}
+      OPENROUTER_SITE_URL: ${{ secrets.OPENROUTER_SITE_URL }}
+      OPENROUTER_APP_NAME: ${{ secrets.OPENROUTER_APP_NAME || 'push-telegram' }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
 
     steps:
       - name: Checkout
@@ -22,13 +31,19 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Validate required secrets
+        run: |
+          set -euo pipefail
+          missing=0
+          for key in TELEGRAM_BOT_TOKEN TELEGRAM_CHAT_ID; do
+            if [ -z "${!key:-}" ]; then
+              echo "::error::Missing required secret: ${key}"
+              missing=1
+            fi
+          done
+          if [ "${missing}" -ne 0 ]; then
+            exit 1
+          fi
+
       - name: Run script
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
-          OPENAI_MODEL: ${{ secrets.OPENAI_MODEL }}
-          OPENROUTER_SITE_URL: ${{ secrets.OPENROUTER_SITE_URL }}
-          OPENROUTER_APP_NAME: ${{ secrets.OPENROUTER_APP_NAME }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python main.py
