@@ -10,7 +10,10 @@ jobs:
   run:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: read
     env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY || secrets.OPENROUTER_API_KEY }}
       OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL || 'https://openrouter.ai/api/v1' }}
       OPENAI_MODEL: ${{ secrets.OPENAI_MODEL || 'openrouter/free' }}
@@ -21,10 +24,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
@@ -47,3 +50,8 @@ jobs:
 
       - name: Run script
         run: python main.py
+
+      - name: Troubleshooting hint on failure
+        if: failure()
+        run: |
+          echo "::warning::Run failed. Please verify TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID and OpenRouter secrets in repo Settings -> Secrets and variables -> Actions."
