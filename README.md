@@ -6,6 +6,7 @@
 2. 提取前 8 个仓库的名称、简介、语言、今日 Star
 3. 用 OpenAI API 把简介翻译为中文
 4. 通过 Telegram Bot API 发送到指定 `chat_id`
+5. 夜间任务自动同步一篇博客到 `admin.lengziyu.cn`
 
 ## 环境要求
 
@@ -43,6 +44,19 @@ OPENAI_MODEL=gpt-5-mini
 说明：
 - `OPENAI_BASE_URL` 不填时默认直连官方 OpenAI。
 - 代理常常要求特定模型名，如果报模型相关错误，把 `OPENAI_MODEL` 改成代理支持的模型。
+
+如果要开启夜间自动发博客，还需要：
+
+```env
+ADMIN_BASE_URL=https://admin.lengziyu.cn
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=your_admin_password
+RUN_NIGHT_BLOG=false
+```
+
+说明：
+- `RUN_NIGHT_BLOG=true` 时会登录 admin 后台并写入 `blog_posts`。
+- 工作流里只在北京时间 `19:30` 自动开启该功能（`09:00` 仅推送 Telegram）。
 
 ### OpenRouter 免费路由示例
 
@@ -103,3 +117,6 @@ python3 main.py --dry-run
 - `OPENROUTER_APP_NAME`（可选）
 - `TELEGRAM_BOT_TOKEN`
 - `TELEGRAM_CHAT_ID`
+- `ADMIN_BASE_URL`（夜间发博客必填）
+- `ADMIN_USERNAME`（夜间发博客必填）
+- `ADMIN_PASSWORD`（夜间发博客必填）

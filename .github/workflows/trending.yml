@@ -5,6 +5,11 @@ on:
     - cron: "0 1 * * *" # Every day at 09:00 Asia/Shanghai (UTC+8)
     - cron: "30 11 * * *" # Every day at 19:30 Asia/Shanghai (UTC+8)
   workflow_dispatch:
+    inputs:
+      publish_blog:
+        description: "Also publish blog post in this manual run"
+        required: false
+        default: "false"
 
 jobs:
   run:
@@ -21,6 +26,10 @@ jobs:
       OPENROUTER_APP_NAME: ${{ secrets.OPENROUTER_APP_NAME || vars.OPENROUTER_APP_NAME || 'push-telegram' }}
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN || vars.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID || vars.TELEGRAM_CHAT_ID }}
+      ADMIN_BASE_URL: ${{ secrets.ADMIN_BASE_URL || vars.ADMIN_BASE_URL }}
+      ADMIN_USERNAME: ${{ secrets.ADMIN_USERNAME || vars.ADMIN_USERNAME }}
+      ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD || vars.ADMIN_PASSWORD }}
+      RUN_NIGHT_BLOG: ${{ (github.event_name == 'schedule' && github.event.schedule == '30 11 * * *') || (github.event_name == 'workflow_dispatch' && inputs.publish_blog == 'true') }}
 
     steps:
       - name: Checkout
@@ -41,6 +50,21 @@ jobs:
           for key in TELEGRAM_BOT_TOKEN TELEGRAM_CHAT_ID; do
             if [ -z "${!key:-}" ]; then
               echo "::error::Missing required secret: ${key}"
+              missing=1
+            fi
+          done
+          if [ "${missing}" -ne 0 ]; then
+            exit 1
+          fi
+
+      - name: Validate blog publish secrets (night run only)
+        if: env.RUN_NIGHT_BLOG == 'true'
+        run: |
+          set -euo pipefail
+          missing=0
+          for key in ADMIN_BASE_URL ADMIN_USERNAME ADMIN_PASSWORD; do
+            if [ -z "${!key:-}" ]; then
+              echo "::error::Missing required secret for blog publish: ${key}"
               missing=1
             fi
           done
