@@ -50,11 +50,15 @@ jobs:
       - name: Validate push channel secrets
         run: |
           set -euo pipefail
-          channels_raw="$(echo "${PUSH_CHANNELS:-telegram}" | tr '[:upper:]' '[:lower:]')"
-          channels="$(echo "${channels_raw}" | tr ',[:space:]' '\n' | sed '/^$/d' | sort -u)"
+          channels_raw="$(printf '%s' "${PUSH_CHANNELS:-telegram}" | tr '[:upper:]' '[:lower:]')"
+          channels_clean="$(printf '%s' "${channels_raw}" | tr -d '[:space:]')"
+          channels="$(printf '%s' "${channels_clean}" | tr ',' '\n' | sed '/^$/d' | sort -u)"
           if [ -z "${channels}" ]; then
             channels="telegram"
           fi
+          echo "Resolved PUSH_CHANNELS=${channels_clean:-telegram}"
+          echo "Resolved channels:"
+          echo "${channels}" | sed 's/^/- /'
 
           missing=0
 
