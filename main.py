@@ -1,9 +1,13 @@
 import argparse
+import base64
+import hashlib
+import hmac
 import json
 import logging
 import os
 import re
 import sys
+import time
 from datetime import datetime, timedelta, timezone
 from typing import List
 
@@ -16,8 +20,11 @@ TRENDING_URL = "https://github.com/trending"
 TOP_N = 8
 TELEGRAM_MAX_LEN = 4096
 TELEGRAM_SAFE_LEN = 3800
+FEISHU_TEXT_SAFE_LEN = 3000
+WECOM_MARKDOWN_SAFE_BYTES = 3800
 REQUEST_TIMEOUT = 30
 CN_TZ = timezone(timedelta(hours=8))
+SUPPORTED_PUSH_CHANNELS = ("telegram", "feishu", "wecom")
 
 logger = logging.getLogger("trending_bot")
 
@@ -245,6 +252,30 @@ def parse_bool_env(name: str, default: bool = False) -> bool:
     return raw in {"1", "true", "yes", "y", "on"}
 
 
+def parse_push_channels(raw: str | None) -> List[str]:
+    candidate = (raw or "telegram").strip()
+    if not candidate:
+        candidate = "telegram"
+
+    channels = []
+    seen = set()
+    for token in re.split(r"[,\s]+", candidate):
+        channel = token.strip().lower()
+        if not channel or channel in seen:
+            continue
+        if channel not in SUPPORTED_PUSH_CHANNELS:
+            raise RuntimeError(
+                f"Unsupported channel in PUSH_CHANNELS: {channel}. "
+                f"Supported: {','.join(SUPPORTED_PUSH_CHANNELS)}"
+            )
+        seen.add(channel)
+        channels.append(channel)
+
+    if not channels:
+        raise RuntimeError("No valid channel found in PUSH_CHANNELS.")
+    return channels
+
+
 def create_admin_session(base_url: str, username: str, password: str) -> requests.Session:
     session = requests.Session()
     session.headers.update({"Content-Type": "application/json"})
@@ -391,6 +422,47 @@ def split_message(text: str, max_len: int = TELEGRAM_SAFE_LEN) -> List[str]:
     return chunks
 
 
+def split_message_by_utf8_bytes(text: str, max_bytes: int) -> List[str]:
+    if len(text.encode("utf-8")) <= max_bytes:
+        return [text]
+
+    chunks = []
+    current = ""
+    paragraphs = text.split("\n\n")
+
+    def flush() -> None:
+        nonlocal current
+        if current:
+            chunks.append(current)
+            current = ""
+
+    for paragraph in paragraphs:
+        candidate = f"{current}\n\n{paragraph}".strip() if current else paragraph
+        if len(candidate.encode("utf-8")) <= max_bytes:
+            current = candidate
+            continue
+
+        flush()
+        if len(paragraph.encode("utf-8")) <= max_bytes:
+            current = paragraph
+            continue
+
+        part = ""
+        for char in paragraph:
+            next_part = f"{part}{char}"
+            if len(next_part.encode("utf-8")) <= max_bytes:
+                part = next_part
+                continue
+            if part:
+                chunks.append(part)
+            part = char
+        if part:
+            chunks.append(part)
+
+    flush()
+    return chunks
+
+
 def send_telegram_messages(messages: List[str], bot_token: str, chat_id: str) -> None:
     if not bot_token or not chat_id:
         raise RuntimeError("Missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID.")
@@ -413,12 +485,69 @@ def send_telegram_messages(messages: List[str], bot_token: str, chat_id: str) ->
         response.raise_for_status()
 
 
+def build_feishu_sign(timestamp: int, secret: str) -> str:
+    string_to_sign = f"{timestamp}\n{secret}"
+    digest = hmac.new(
+        string_to_sign.encode("utf-8"),
+        digestmod=hashlib.sha256,
+    ).digest()
+    return base64.b64encode(digest).decode("utf-8")
+
+
+def parse_json_response(response: requests.Response) -> dict:
+    try:
+        return response.json() if response.content else {}
+    except ValueError:
+        return {}
+
+
+def send_feishu_messages(messages: List[str], webhook_url: str, sign_secret: str | None = None) -> None:
+    if not webhook_url:
+        raise RuntimeError("Missing FEISHU_WEBHOOK_URL.")
+
+    for index, message in enumerate(messages, 1):
+        payload = {
+            "msg_type": "text",
+            "content": {"text": message},
+        }
+        if sign_secret:
+            now = int(time.time())
+            payload["timestamp"] = str(now)
+            payload["sign"] = build_feishu_sign(now, sign_secret)
+
+        logger.info("Sending Feishu message part %s/%s", index, len(messages))
+        response = requests.post(webhook_url, json=payload, timeout=REQUEST_TIMEOUT)
+        response.raise_for_status()
+        data = parse_json_response(response)
+        code = data.get("code")
+        if code not in (None, 0):
+            raise RuntimeError(f"Feishu webhook failed: code={code}, msg={data.get('msg')}")
+
+
+def send_wecom_messages(messages: List[str], webhook_url: str) -> None:
+    if not webhook_url:
+        raise RuntimeError("Missing WECOM_WEBHOOK_URL.")
+
+    for index, message in enumerate(messages, 1):
+        payload = {
+            "msgtype": "markdown",
+            "markdown": {"content": message},
+        }
+        logger.info("Sending WeCom message part %s/%s", index, len(messages))
+        response = requests.post(webhook_url, json=payload, timeout=REQUEST_TIMEOUT)
+        response.raise_for_status()
+        data = parse_json_response(response)
+        errcode = data.get("errcode")
+        if errcode not in (None, 0):
+            raise RuntimeError(f"WeCom webhook failed: errcode={errcode}, errmsg={data.get('errmsg')}")
+
+
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Fetch GitHub trending and push to Telegram.")
+    parser = argparse.ArgumentParser(description="Fetch GitHub trending and push to multiple channels.")
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Print message to stdout without sending to Telegram.",
+        help="Print message to stdout without sending to push channels.",
     )
     return parser.parse_args()
 
@@ -449,12 +578,29 @@ def main() -> int:
         if default_headers:
             logger.info("Using OpenRouter headers: %s", ",".join(sorted(default_headers.keys())))
 
-    telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
-    telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID")
-
-    if not args.dry_run and (not telegram_bot_token or not telegram_chat_id):
-        logger.error("Missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID in environment.")
+    try:
+        push_channels = parse_push_channels(os.getenv("PUSH_CHANNELS"))
+    except RuntimeError as exc:
+        logger.error("%s", exc)
         return 1
+    logger.info("Enabled push channels: %s", ",".join(push_channels))
+
+    telegram_bot_token = (os.getenv("TELEGRAM_BOT_TOKEN") or "").strip()
+    telegram_chat_id = (os.getenv("TELEGRAM_CHAT_ID") or "").strip()
+    feishu_webhook_url = (os.getenv("FEISHU_WEBHOOK_URL") or "").strip()
+    feishu_sign_secret = (os.getenv("FEISHU_SIGN_SECRET") or "").strip()
+    wecom_webhook_url = (os.getenv("WECOM_WEBHOOK_URL") or "").strip()
+
+    if not args.dry_run:
+        if "telegram" in push_channels and (not telegram_bot_token or not telegram_chat_id):
+            logger.error("Channel telegram enabled but TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID is missing.")
+            return 1
+        if "feishu" in push_channels and not feishu_webhook_url:
+            logger.error("Channel feishu enabled but FEISHU_WEBHOOK_URL is missing.")
+            return 1
+        if "wecom" in push_channels and not wecom_webhook_url:
+            logger.error("Channel wecom enabled but WECOM_WEBHOOK_URL is missing.")
+            return 1
 
     try:
         items = fetch_trending(TOP_N)
@@ -478,16 +624,26 @@ def main() -> int:
                 desc_zh_list = fallback_descriptions(items)
 
         final_message = format_message(items, desc_zh_list)
-        message_chunks = split_message(final_message)
-        logger.info("Prepared %s message chunk(s).", len(message_chunks))
+        preview_chunks = split_message(final_message)
+        logger.info("Prepared %s preview chunk(s).", len(preview_chunks))
 
         if args.dry_run:
-            logger.info("Dry-run mode enabled. No Telegram messages will be sent.")
-            for idx, chunk in enumerate(message_chunks, 1):
-                print(f"\n===== MESSAGE {idx}/{len(message_chunks)} =====\n{chunk}\n")
+            logger.info("Dry-run mode enabled. No push messages will be sent.")
+            for idx, chunk in enumerate(preview_chunks, 1):
+                print(f"\n===== MESSAGE {idx}/{len(preview_chunks)} =====\n{chunk}\n")
         else:
-            send_telegram_messages(message_chunks, telegram_bot_token, telegram_chat_id)
-            logger.info("All Telegram messages sent successfully.")
+            if "telegram" in push_channels:
+                telegram_chunks = split_message(final_message, max_len=TELEGRAM_SAFE_LEN)
+                send_telegram_messages(telegram_chunks, telegram_bot_token, telegram_chat_id)
+                logger.info("Telegram messages sent successfully.")
+            if "feishu" in push_channels:
+                feishu_chunks = split_message(final_message, max_len=FEISHU_TEXT_SAFE_LEN)
+                send_feishu_messages(feishu_chunks, feishu_webhook_url, feishu_sign_secret or None)
+                logger.info("Feishu messages sent successfully.")
+            if "wecom" in push_channels:
+                wecom_chunks = split_message_by_utf8_bytes(final_message, max_bytes=WECOM_MARKDOWN_SAFE_BYTES)
+                send_wecom_messages(wecom_chunks, wecom_webhook_url)
+                logger.info("WeCom messages sent successfully.")
 
         maybe_publish_blog_post(items, desc_zh_list, dry_run=args.dry_run)
         return 0

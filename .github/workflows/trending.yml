@@ -1,4 +1,4 @@
-name: GitHub Trending to Telegram
+name: GitHub Trending Push
 
 on:
   schedule:
@@ -24,8 +24,12 @@ jobs:
       OPENAI_MODEL: ${{ secrets.OPENAI_MODEL || vars.OPENAI_MODEL || 'openrouter/free' }}
       OPENROUTER_SITE_URL: ${{ secrets.OPENROUTER_SITE_URL || vars.OPENROUTER_SITE_URL }}
       OPENROUTER_APP_NAME: ${{ secrets.OPENROUTER_APP_NAME || vars.OPENROUTER_APP_NAME || 'push-telegram' }}
+      PUSH_CHANNELS: ${{ secrets.PUSH_CHANNELS || vars.PUSH_CHANNELS || 'telegram' }}
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN || vars.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID || vars.TELEGRAM_CHAT_ID }}
+      FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL || vars.FEISHU_WEBHOOK_URL }}
+      FEISHU_SIGN_SECRET: ${{ secrets.FEISHU_SIGN_SECRET || vars.FEISHU_SIGN_SECRET }}
+      WECOM_WEBHOOK_URL: ${{ secrets.WECOM_WEBHOOK_URL || vars.WECOM_WEBHOOK_URL }}
       ADMIN_BASE_URL: ${{ secrets.ADMIN_BASE_URL || vars.ADMIN_BASE_URL }}
       ADMIN_USERNAME: ${{ secrets.ADMIN_USERNAME || vars.ADMIN_USERNAME }}
       ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD || vars.ADMIN_PASSWORD }}
@@ -43,16 +47,40 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Validate required secrets
+      - name: Validate push channel secrets
         run: |
           set -euo pipefail
+          channels_raw="$(echo "${PUSH_CHANNELS:-telegram}" | tr '[:upper:]' '[:lower:]')"
+          channels="$(echo "${channels_raw}" | tr ',[:space:]' '\n' | sed '/^$/d' | sort -u)"
+          if [ -z "${channels}" ]; then
+            channels="telegram"
+          fi
+
           missing=0
-          for key in TELEGRAM_BOT_TOKEN TELEGRAM_CHAT_ID; do
-            if [ -z "${!key:-}" ]; then
-              echo "::error::Missing required secret: ${key}"
+
+          if echo "${channels}" | grep -q '^telegram$'; then
+            for key in TELEGRAM_BOT_TOKEN TELEGRAM_CHAT_ID; do
+              if [ -z "${!key:-}" ]; then
+                echo "::error::Missing required secret for telegram: ${key}"
+                missing=1
+              fi
+            done
+          fi
+
+          if echo "${channels}" | grep -q '^feishu$'; then
+            if [ -z "${FEISHU_WEBHOOK_URL:-}" ]; then
+              echo "::error::Missing required secret for feishu: FEISHU_WEBHOOK_URL"
               missing=1
             fi
-          done
+          fi
+
+          if echo "${channels}" | grep -q '^wecom$'; then
+            if [ -z "${WECOM_WEBHOOK_URL:-}" ]; then
+              echo "::error::Missing required secret for wecom: WECOM_WEBHOOK_URL"
+              missing=1
+            fi
+          fi
+
           if [ "${missing}" -ne 0 ]; then
             exit 1
           fi
@@ -78,4 +106,4 @@ jobs:
       - name: Troubleshooting hint on failure
         if: failure()
         run: |
-          echo "::warning::Run failed. Please verify TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID and OpenRouter secrets in repo Settings -> Secrets and variables -> Actions."
+          echo "::warning::Run failed. Please verify PUSH_CHANNELS and corresponding webhook/token secrets in repo Settings -> Secrets and variables -> Actions."

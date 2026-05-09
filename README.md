@@ -1,11 +1,11 @@
-# GitHub Trending Telegram Bot
+# GitHub Trending Push Bot
 
 一个简单的 Python 脚本，用于：
 
 1. 抓取 [GitHub Trending](https://github.com/trending)
 2. 提取前 8 个仓库的名称、简介、语言、今日 Star
 3. 用 OpenAI API 把简介翻译为中文
-4. 通过 Telegram Bot API 发送到指定 `chat_id`
+4. 推送到一个或多个平台（Telegram / 飞书 / 企业微信）
 5. 夜间任务自动同步一篇博客到 `admin.lengziyu.cn`
 
 ## 环境要求
@@ -26,12 +26,33 @@ pip3 install -r requirements.txt
 cp .env.example .env
 ```
 
-`.env` 需要包含：
+`.env` 至少需要包含：
 
 ```env
 OPENAI_API_KEY=your_openai_api_key
+PUSH_CHANNELS=telegram
 TELEGRAM_BOT_TOKEN=your_telegram_bot_token
 TELEGRAM_CHAT_ID=your_telegram_chat_id
+```
+
+`PUSH_CHANNELS` 支持多个平台，逗号分隔，例如：
+
+```env
+PUSH_CHANNELS=telegram,feishu,wecom
+```
+
+如果启用了飞书：
+
+```env
+FEISHU_WEBHOOK_URL=https://open.feishu.cn/open-apis/bot/v2/hook/xxx
+# 可选：若飞书机器人开启签名校验
+FEISHU_SIGN_SECRET=your_feishu_sign_secret
+```
+
+如果启用了企业微信：
+
+```env
+WECOM_WEBHOOK_URL=https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx
 ```
 
 如果你使用的是 OpenAI 兼容代理，还可以加：
@@ -56,7 +77,7 @@ RUN_NIGHT_BLOG=false
 
 说明：
 - `RUN_NIGHT_BLOG=true` 时会登录 admin 后台并写入 `blog_posts`。
-- 工作流里只在北京时间 `19:30` 自动开启该功能（`09:00` 仅推送 Telegram）。
+- 工作流里只在北京时间 `19:30` 自动开启该功能（`09:00` 仅推送消息，不发布博客）。
 
 ### OpenRouter 免费路由示例
 
@@ -72,7 +93,7 @@ OPENROUTER_APP_NAME=push-telegram
 
 ## 本地运行
 
-正常发送到 Telegram：
+正常发送（按 `PUSH_CHANNELS` 推送）：
 
 ```bash
 python3 main.py
@@ -91,11 +112,20 @@ python3 main.py --dry-run
 ./run.sh --dry-run
 ```
 
+平台连通性测试脚本：
+
+```bash
+./test_telegram.sh "telegram test ok"
+./test_feishu.sh "feishu test ok"
+./test_wecom.sh "wecom test ok"
+```
+
 ## 日志与健壮性
 
 - 使用标准 `logging` 输出清晰日志
 - 对网络请求和运行时异常做了捕获
 - Telegram 文本会自动分段，避免超过单条长度限制（4096 字符）
+- 企业微信 markdown 推送会按 UTF-8 字节自动分段，避免超过单条长度限制
 
 ## GitHub Actions 定时执行
 
@@ -115,8 +145,12 @@ python3 main.py --dry-run
 - `OPENAI_MODEL`（可选，不填默认 `openrouter/free`）
 - `OPENROUTER_SITE_URL`（可选）
 - `OPENROUTER_APP_NAME`（可选）
-- `TELEGRAM_BOT_TOKEN`
-- `TELEGRAM_CHAT_ID`
+- `PUSH_CHANNELS`（可选，默认 `telegram`）
+- `TELEGRAM_BOT_TOKEN`（当启用 `telegram` 必填）
+- `TELEGRAM_CHAT_ID`（当启用 `telegram` 必填）
+- `FEISHU_WEBHOOK_URL`（当启用 `feishu` 必填）
+- `FEISHU_SIGN_SECRET`（可选，飞书签名校验启用时填写）
+- `WECOM_WEBHOOK_URL`（当启用 `wecom` 必填）
 - `ADMIN_BASE_URL`（夜间发博客必填）
 - `ADMIN_USERNAME`（夜间发博客必填）
 - `ADMIN_PASSWORD`（夜间发博客必填）
